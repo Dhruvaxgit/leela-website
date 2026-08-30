@@ -293,8 +293,14 @@ function Domain() {
 
           <br />
           <details>
-            <summary>View Raw JSON from ResellerClub API</summary>
+            <summary>View Raw Availability JSON (from available.json)</summary>
             <pre>{JSON.stringify(cachedResults.data, null, 2)}</pre>
+          </details>
+
+          <br />
+          <details>
+            <summary>View Raw Pricing Catalog JSON (from customer-price.json)</summary>
+            <pre>{prices ? JSON.stringify(prices, null, 2) : 'Pricing data not loaded yet'}</pre>
           </details>
 
           <br />
