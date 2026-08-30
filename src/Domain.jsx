@@ -206,6 +206,12 @@ function Domain() {
           </table>
 
           <br />
+          <details>
+            <summary>View Raw JSON from ResellerClub API</summary>
+            <pre>{JSON.stringify(cachedResults.data, null, 2)}</pre>
+          </details>
+
+          <br />
           <button type="button" onClick={clearBrowserCache}>
             Clear Cache Memory
           </button>
