@@ -62,8 +62,8 @@ function Domain() {
       return;
     }
 
-    // Detect if user explicitly typed an extension (e.g. .in or .com)
-    const preferredTld = parts.length > 1 && (parts[1] === 'in' || parts[1] === 'com') ? parts[1] : null;
+    // Detect if user explicitly typed an extension (e.g. .in, .com, or .io)
+    const preferredTld = parts.length > 1 && ['in', 'com', 'io'].includes(parts[1]) ? parts[1] : null;
 
     const currentUserId = authUserId.trim() || localStorage.getItem('rc_auth_userid');
     const currentApiKey = apiKey.trim() || localStorage.getItem('rc_api_key');
@@ -77,14 +77,14 @@ function Domain() {
     setLoading(true);
 
     try {
-      // Connect directly to ResellerClub API endpoint via local proxy (querying both .com and .in)
+      // Connect directly to ResellerClub API endpoint via local proxy (querying .com, .in, and .io)
       const queryParams = new URLSearchParams({
         'auth-userid': currentUserId,
         'api-key': currentApiKey,
         'domain-name': cleanName,
         'tlds': 'com'
       });
-      const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in`;
+      const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in&tlds=io`;
 
       const response = await fetch(url);
       const text = await response.text();
@@ -105,7 +105,8 @@ function Domain() {
       // Check if expected domain keys exist in the JSON response
       const comKey = `${cleanName}.com`;
       const inKey = `${cleanName}.in`;
-      if (!responseJsonData[comKey] && !responseJsonData[inKey]) {
+      const ioKey = `${cleanName}.io`;
+      if (!responseJsonData[comKey] && !responseJsonData[inKey] && !responseJsonData[ioKey]) {
         throw new Error('Unexpected response format from Reseller API');
       }
 
@@ -184,7 +185,7 @@ function Domain() {
 
       <hr />
 
-      <h2>Domain Availability Search (.com & .in)</h2>
+      <h2>Domain Availability Search (.com, .in & .io)</h2>
 
       {/* Search Bar Form */}
       <form onSubmit={handleSearch}>
@@ -192,7 +193,7 @@ function Domain() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Enter domain name (e.g. google, brandname, or brand.in)"
+          placeholder="Enter domain name (e.g. google, brandname, or brand.io)"
         />
         <button type="submit" disabled={loading}>
           {loading ? 'Checking with Reseller API...' : 'Search'}
