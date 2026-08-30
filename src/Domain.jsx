@@ -65,6 +65,8 @@ function Domain() {
       priceVal = prices.dotin?.addnewdomain?.['1'];
     } else if (domainName.endsWith('.io')) {
       priceVal = prices.dotio?.addnewdomain?.['1'];
+    } else if (domainName.endsWith('.tech')) {
+      priceVal = prices.dottech?.addnewdomain?.['1'];
     }
     if (priceVal !== undefined && priceVal !== null) {
       return `₹${Number(priceVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / yr`;
@@ -109,8 +111,8 @@ function Domain() {
       return;
     }
 
-    // Detect if user explicitly typed an extension (e.g. .in, .com, or .io)
-    const preferredTld = parts.length > 1 && ['in', 'com', 'io'].includes(parts[1]) ? parts[1] : null;
+    // Detect if user explicitly typed an extension (e.g. .in, .com, .io, or .tech)
+    const preferredTld = parts.length > 1 && ['in', 'com', 'io', 'tech'].includes(parts[1]) ? parts[1] : null;
 
     const currentUserId = authUserId.trim() || localStorage.getItem('rc_auth_userid');
     const currentApiKey = apiKey.trim() || localStorage.getItem('rc_api_key');
@@ -129,14 +131,14 @@ function Domain() {
         fetchPricing(currentUserId, currentApiKey);
       }
 
-      // Connect directly to ResellerClub API endpoint via local proxy (querying .com, .in, and .io)
+      // Connect directly to ResellerClub API endpoint via local proxy (querying .com, .in, .io, and .tech)
       const queryParams = new URLSearchParams({
         'auth-userid': currentUserId,
         'api-key': currentApiKey,
         'domain-name': cleanName,
         'tlds': 'com'
       });
-      const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in&tlds=io`;
+      const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in&tlds=io&tlds=tech`;
 
       const response = await fetch(url);
       const text = await response.text();
@@ -158,7 +160,8 @@ function Domain() {
       const comKey = `${cleanName}.com`;
       const inKey = `${cleanName}.in`;
       const ioKey = `${cleanName}.io`;
-      if (!responseJsonData[comKey] && !responseJsonData[inKey] && !responseJsonData[ioKey]) {
+      const techKey = `${cleanName}.tech`;
+      if (!responseJsonData[comKey] && !responseJsonData[inKey] && !responseJsonData[ioKey] && !responseJsonData[techKey]) {
         throw new Error('Unexpected response format from Reseller API');
       }
 
@@ -184,7 +187,7 @@ function Domain() {
     setCachedResults(null);
   };
 
-  // Helper to order results: if user specified .in or .com, put that domain at the top; otherwise keep default registry order
+  // Helper to order results: if user specified an extension, put that domain at the top; otherwise keep default registry order
   const getOrderedResults = () => {
     if (!cachedResults || !cachedResults.data) return [];
     const entries = Object.entries(cachedResults.data);
@@ -237,7 +240,7 @@ function Domain() {
 
       <hr />
 
-      <h2>Domain Availability Search (.com, .in & .io)</h2>
+      <h2>Domain Availability Search (.com, .in, .io & .tech)</h2>
 
       {/* Search Bar Form */}
       <form onSubmit={handleSearch}>
@@ -245,7 +248,7 @@ function Domain() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Enter domain name (e.g. google, brandname, or brand.io)"
+          placeholder="Enter domain name (e.g. google, brandname, or brand.tech)"
         />
         <button type="submit" disabled={loading}>
           {loading ? 'Checking with Reseller API...' : 'Search'}
