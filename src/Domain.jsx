@@ -12,17 +12,64 @@ function Domain() {
   const [error, setError] = useState('');
   const [savedNotice, setSavedNotice] = useState('');
 
+  const [prices, setPrices] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('rc_pricing_catalog');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   // 1. Check for existing cached search results on initial load
   useEffect(() => {
     loadFromBrowserCache();
+    // Pre-fetch pricing if credentials exist
+    const currentUserId = authUserId.trim() || localStorage.getItem('rc_auth_userid');
+    const currentApiKey = apiKey.trim() || localStorage.getItem('rc_api_key');
+    if (currentUserId && currentApiKey && !prices) {
+      fetchPricing(currentUserId, currentApiKey);
+    }
   }, []);
+
+  const fetchPricing = async (userId, key) => {
+    try {
+      const url = `/api/products/customer-price.json?auth-userid=${userId}&api-key=${key}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const pricingData = await res.json();
+        setPrices(pricingData);
+        sessionStorage.setItem('rc_pricing_catalog', JSON.stringify(pricingData));
+      }
+    } catch (e) {
+      console.error('Failed to fetch pricing:', e);
+    }
+  };
 
   const saveCredentials = (e) => {
     e.preventDefault();
     localStorage.setItem('rc_auth_userid', authUserId.trim());
     localStorage.setItem('rc_api_key', apiKey.trim());
     setSavedNotice('Credentials saved successfully in browser storage.');
+    fetchPricing(authUserId.trim(), apiKey.trim());
     setTimeout(() => setSavedNotice(''), 3000);
+  };
+
+  // Helper to extract 1-year price for a domain from the pricing catalog
+  const getDomainPrice = (domainName) => {
+    if (!prices) return null;
+    let priceVal = null;
+    if (domainName.endsWith('.com')) {
+      priceVal = prices.domcno?.addnewdomain?.['1'];
+    } else if (domainName.endsWith('.in')) {
+      priceVal = prices.dotin?.addnewdomain?.['1'];
+    } else if (domainName.endsWith('.io')) {
+      priceVal = prices.dotio?.addnewdomain?.['1'];
+    }
+    if (priceVal !== undefined && priceVal !== null) {
+      return `₹${Number(priceVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / yr`;
+    }
+    return null;
   };
 
   // 2. Fetch data from browser cache memory
@@ -77,6 +124,11 @@ function Domain() {
     setLoading(true);
 
     try {
+      // Ensure pricing catalog is loaded in parallel
+      if (!prices) {
+        fetchPricing(currentUserId, currentApiKey);
+      }
+
       // Connect directly to ResellerClub API endpoint via local proxy (querying .com, .in, and .io)
       const queryParams = new URLSearchParams({
         'auth-userid': currentUserId,
@@ -217,16 +269,21 @@ function Domain() {
               <tr>
                 <th>Domain Name</th>
                 <th>Status</th>
+                <th>Price / Year</th>
               </tr>
             </thead>
             <tbody>
               {getOrderedResults().map(([domain, details]) => {
                 const isAvailable = details?.status === 'available';
+                const priceFormatted = getDomainPrice(domain);
                 return (
                   <tr key={domain}>
                     <td>{domain}</td>
                     <td>
                       {isAvailable ? 'Available' : 'Not Available'}
+                    </td>
+                    <td>
+                      {isAvailable ? (priceFormatted || 'Loading price...') : '—'}
                     </td>
                   </tr>
                 );
