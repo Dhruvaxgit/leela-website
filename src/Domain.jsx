@@ -53,11 +53,17 @@ function Domain() {
     e.preventDefault();
     setError('');
 
-    const cleanName = query.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
+    const rawInput = query.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '');
+    const parts = rawInput.split('.');
+    const cleanName = parts[0];
+
     if (!cleanName) {
       setError('Please enter a domain name.');
       return;
     }
+
+    // Detect if user explicitly typed an extension (e.g. .in or .com)
+    const preferredTld = parts.length > 1 && (parts[1] === 'in' || parts[1] === 'com') ? parts[1] : null;
 
     const currentUserId = authUserId.trim() || localStorage.getItem('rc_auth_userid');
     const currentApiKey = apiKey.trim() || localStorage.getItem('rc_api_key');
@@ -103,9 +109,10 @@ function Domain() {
         throw new Error('Unexpected response format from Reseller API');
       }
 
-      // Save real API JSON response directly into browser cache memory
+      // Save real API JSON response directly into browser cache memory along with preferred extension
       const cachePayload = {
         searchedQuery: cleanName,
+        preferredTld: preferredTld,
         timestamp: new Date().toLocaleTimeString(),
         data: responseJsonData
       };
@@ -122,6 +129,27 @@ function Domain() {
   const clearBrowserCache = () => {
     sessionStorage.removeItem(CACHE_STORAGE_KEY);
     setCachedResults(null);
+  };
+
+  // Helper to order results: if user specified .in or .com, put that domain at the top; otherwise keep default registry order
+  const getOrderedResults = () => {
+    if (!cachedResults || !cachedResults.data) return [];
+    const entries = Object.entries(cachedResults.data);
+    const preferred = cachedResults.preferredTld;
+
+    if (!preferred) {
+      // Default rule: preserve natural order received from registry
+      return entries;
+    }
+
+    // User explicitly typed an extension: place matching domain first
+    return [...entries].sort(([domainA], [domainB]) => {
+      const aMatches = domainA.endsWith(`.${preferred}`);
+      const bMatches = domainB.endsWith(`.${preferred}`);
+      if (aMatches && !bMatches) return -1;
+      if (!aMatches && bMatches) return 1;
+      return 0;
+    });
   };
 
   return (
@@ -164,7 +192,7 @@ function Domain() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Enter domain name (e.g. google, brandname)"
+          placeholder="Enter domain name (e.g. google, brandname, or brand.in)"
         />
         <button type="submit" disabled={loading}>
           {loading ? 'Checking with Reseller API...' : 'Search'}
@@ -191,7 +219,7 @@ function Domain() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(cachedResults.data).map(([domain, details]) => {
+              {getOrderedResults().map(([domain, details]) => {
                 const isAvailable = details?.status === 'available';
                 return (
                   <tr key={domain}>
