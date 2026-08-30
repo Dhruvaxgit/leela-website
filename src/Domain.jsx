@@ -59,14 +59,14 @@ function Domain() {
       let responseJsonData;
 
       if (authUserId && apiKey) {
-        // Step 1: Connect to ResellerClub API via the proxy
+        // Step 1: Connect to ResellerClub API via the proxy (only .com)
         const queryParams = new URLSearchParams({
           'auth-userid': authUserId,
           'api-key': apiKey,
           'domain-name': cleanName,
           'tlds': 'com'
         });
-        const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in`;
+        const url = `/api/domains/available.json?${queryParams.toString()}`;
 
         const response = await fetch(url);
         if (!response.ok) {
@@ -74,16 +74,12 @@ function Domain() {
         }
         responseJsonData = await response.json();
       } else {
-        // Simulated API response for testing when credentials are not yet entered
+        // Simulated API response for testing (only .com)
         await new Promise((resolve) => setTimeout(resolve, 400));
         responseJsonData = {
           [`${cleanName}.com`]: {
             status: cleanName.length % 2 === 0 ? 'available' : 'regthroughothers',
             classkey: 'domcno'
-          },
-          [`${cleanName}.in`]: {
-            status: 'available',
-            classkey: 'dotin'
           }
         };
       }
