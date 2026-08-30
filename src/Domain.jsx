@@ -71,14 +71,14 @@ function Domain() {
     setLoading(true);
 
     try {
-      // Connect directly to ResellerClub API endpoint via local proxy
+      // Connect directly to ResellerClub API endpoint via local proxy (querying both .com and .in)
       const queryParams = new URLSearchParams({
         'auth-userid': currentUserId,
         'api-key': currentApiKey,
         'domain-name': cleanName,
         'tlds': 'com'
       });
-      const url = `/api/domains/available.json?${queryParams.toString()}`;
+      const url = `/api/domains/available.json?${queryParams.toString()}&tlds=in`;
 
       const response = await fetch(url);
       const text = await response.text();
@@ -96,9 +96,10 @@ function Domain() {
         throw new Error(responseJsonData.message || 'ResellerClub API error response');
       }
 
-      // Check if the expected domain key exists in the JSON response
-      const domainKey = `${cleanName}.com`;
-      if (!responseJsonData[domainKey]) {
+      // Check if expected domain keys exist in the JSON response
+      const comKey = `${cleanName}.com`;
+      const inKey = `${cleanName}.in`;
+      if (!responseJsonData[comKey] && !responseJsonData[inKey]) {
         throw new Error('Unexpected response format from Reseller API');
       }
 
@@ -155,7 +156,7 @@ function Domain() {
 
       <hr />
 
-      <h2>Domain Availability Search (.com)</h2>
+      <h2>Domain Availability Search (.com & .in)</h2>
 
       {/* Search Bar Form */}
       <form onSubmit={handleSearch}>
@@ -180,7 +181,7 @@ function Domain() {
       {/* Display data fetched from browser cache memory */}
       {cachedResults && (
         <div>
-          <h3>Results for "{cachedResults.searchedQuery}.com" (Cached at {cachedResults.timestamp})</h3>
+          <h3>Results for "{cachedResults.searchedQuery}" (Cached at {cachedResults.timestamp})</h3>
 
           <table border="1" cellPadding="6">
             <thead>
