@@ -5,16 +5,27 @@ const CACHE_STORAGE_KEY = 'domain_search_cache';
 
 function Domain() {
   const [query, setQuery] = useState('');
+  const [authUserId, setAuthUserId] = useState(() => localStorage.getItem('rc_auth_userid') || '');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('rc_api_key') || '');
   const [cachedResults, setCachedResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [savedNotice, setSavedNotice] = useState('');
 
-  // On initial component load, check if there is existing data in browser cache memory
+  // 1. Check for existing cached search results on initial load
   useEffect(() => {
     loadFromBrowserCache();
   }, []);
 
-  // Function to fetch data from browser cache memory
+  const saveCredentials = (e) => {
+    e.preventDefault();
+    localStorage.setItem('rc_auth_userid', authUserId.trim());
+    localStorage.setItem('rc_api_key', apiKey.trim());
+    setSavedNotice('Credentials saved successfully in browser storage.');
+    setTimeout(() => setSavedNotice(''), 3000);
+  };
+
+  // 2. Fetch data from browser cache memory
   const loadFromBrowserCache = () => {
     try {
       const savedData = sessionStorage.getItem(CACHE_STORAGE_KEY);
@@ -27,64 +38,71 @@ function Domain() {
     }
   };
 
-  // Function to save JSON response into browser cache memory
+  // 3. Save received JSON data into browser cache memory
   const saveToBrowserCache = (domainSearchData) => {
     try {
       sessionStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(domainSearchData));
-      // After saving, load it back from cache to display
       loadFromBrowserCache();
     } catch (e) {
       console.error('Error writing to browser cache:', e);
     }
   };
 
+  // 4. Handle Real API Call
   const handleSearch = async (e) => {
     e.preventDefault();
     setError('');
 
-    // Clean input: remove spaces, http://, www., and any entered extensions
     const cleanName = query.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
-
     if (!cleanName) {
       setError('Please enter a domain name.');
+      return;
+    }
+
+    const currentUserId = authUserId.trim() || localStorage.getItem('rc_auth_userid');
+    const currentApiKey = apiKey.trim() || localStorage.getItem('rc_api_key');
+
+    // If credentials are not entered, fail immediately with error
+    if (!currentUserId || !currentApiKey) {
+      setError('Failed to fetch data from Reseller API: Missing Reseller Auth User ID or API Key. Please configure your credentials above.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const authUserId = localStorage.getItem('rc_auth_userid');
-      const apiKey = localStorage.getItem('rc_api_key');
+      // Connect directly to ResellerClub API endpoint via local proxy
+      const queryParams = new URLSearchParams({
+        'auth-userid': currentUserId,
+        'api-key': currentApiKey,
+        'domain-name': cleanName,
+        'tlds': 'com'
+      });
+      const url = `/api/domains/available.json?${queryParams.toString()}`;
+
+      const response = await fetch(url);
+      const text = await response.text();
 
       let responseJsonData;
-
-      if (authUserId && apiKey) {
-        // Step 1: Connect to ResellerClub API via the proxy (only .com)
-        const queryParams = new URLSearchParams({
-          'auth-userid': authUserId,
-          'api-key': apiKey,
-          'domain-name': cleanName,
-          'tlds': 'com'
-        });
-        const url = `/api/domains/available.json?${queryParams.toString()}`;
-
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`API returned status ${response.status}`);
-        }
-        responseJsonData = await response.json();
-      } else {
-        // Simulated API response for testing (only .com)
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        responseJsonData = {
-          [`${cleanName}.com`]: {
-            status: cleanName.length % 2 === 0 ? 'available' : 'regthroughothers',
-            classkey: 'domcno'
-          }
-        };
+      try {
+        responseJsonData = JSON.parse(text);
+      } catch (jsonErr) {
+        // If ResellerClub returned HTML error or Cloudflare block
+        throw new Error('Received non-JSON response from server (possible Cloudflare block or IP not whitelisted)');
       }
 
-      // Step 2: Save received JSON response directly into browser cache memory (sessionStorage)
+      // Check if ResellerClub returned an API-level error object (e.g. { status: 'ERROR', message: '...' })
+      if (responseJsonData.status === 'ERROR' || responseJsonData.status === 'error') {
+        throw new Error(responseJsonData.message || 'ResellerClub API error response');
+      }
+
+      // Check if the expected domain key exists in the JSON response
+      const domainKey = `${cleanName}.com`;
+      if (!responseJsonData[domainKey]) {
+        throw new Error('Unexpected response format from Reseller API');
+      }
+
+      // Save real API JSON response directly into browser cache memory
       const cachePayload = {
         searchedQuery: cleanName,
         timestamp: new Date().toLocaleTimeString(),
@@ -93,7 +111,8 @@ function Domain() {
       saveToBrowserCache(cachePayload);
 
     } catch (err) {
-      setError(`Search failed: ${err.message}`);
+      // If-Else failure: Display exact failure message
+      setError(`Failed to fetch data from Reseller API: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -106,7 +125,37 @@ function Domain() {
 
   return (
     <div>
-      <h2>Domain Availability Search</h2>
+      <h2>ResellerClub Credentials Configuration</h2>
+      <form onSubmit={saveCredentials}>
+        <div>
+          <label>
+            Reseller Auth User ID:{' '}
+            <input
+              type="text"
+              value={authUserId}
+              onChange={(e) => setAuthUserId(e.target.value)}
+              placeholder="e.g. 123456"
+            />
+          </label>
+        </div>
+        <div>
+          <label>
+            Reseller API Key:{' '}
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Enter API Key"
+            />
+          </label>
+        </div>
+        <button type="submit">Save Credentials</button>
+        {savedNotice && <p>{savedNotice}</p>}
+      </form>
+
+      <hr />
+
+      <h2>Domain Availability Search (.com)</h2>
 
       {/* Search Bar Form */}
       <form onSubmit={handleSearch}>
@@ -114,21 +163,24 @@ function Domain() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Enter domain name (e.g. google, mycompany)"
+          placeholder="Enter domain name (e.g. google, brandname)"
         />
         <button type="submit" disabled={loading}>
-          {loading ? 'Checking...' : 'Search'}
+          {loading ? 'Checking with Reseller API...' : 'Search'}
         </button>
       </form>
 
+      {/* Error Message when API fetch fails */}
       {error && (
-        <p><strong>Error:</strong> {error}</p>
+        <div>
+          <p><strong>Error:</strong> {error}</p>
+        </div>
       )}
 
       {/* Display data fetched from browser cache memory */}
       {cachedResults && (
         <div>
-          <h3>Results for "{cachedResults.searchedQuery}" (Cached at {cachedResults.timestamp})</h3>
+          <h3>Results for "{cachedResults.searchedQuery}.com" (Cached at {cachedResults.timestamp})</h3>
 
           <table border="1" cellPadding="6">
             <thead>
