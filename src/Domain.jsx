@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 const CACHE_STORAGE_KEY = 'domain_search_cache';
 const CART_STORAGE_KEY = 'leela_cart_cache';
 
-function Domain() {
+function Domain({ onProceedToCheckout }) {
   const [query, setQuery] = useState('');
   const [authUserId, setAuthUserId] = useState(() => localStorage.getItem('rc_auth_userid') || '');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('rc_api_key') || '');
@@ -421,6 +421,10 @@ function Domain() {
 
             <button type="button" onClick={clearCart}>
               Clear Cart
+            </button>
+            <span> </span>
+            <button type="button" onClick={onProceedToCheckout}>
+              Proceed to Checkout &rarr;
             </button>
           </div>
         )}
