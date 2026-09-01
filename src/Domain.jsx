@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // Key used to store and retrieve data from browser cache memory (sessionStorage)
 const CACHE_STORAGE_KEY = 'domain_search_cache';
+const CART_STORAGE_KEY = 'leela_cart_cache';
 
 function Domain() {
   const [query, setQuery] = useState('');
@@ -18,6 +19,15 @@ function Domain() {
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
+    }
+  });
+
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(CART_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
     }
   });
 
@@ -55,9 +65,9 @@ function Domain() {
     setTimeout(() => setSavedNotice(''), 3000);
   };
 
-  // Helper to extract 1-year price for a domain from the pricing catalog
-  const getDomainPrice = (domainName) => {
-    if (!prices) return null;
+  // Helper to extract numeric 1-year price for a domain
+  const getDomainRawPrice = (domainName) => {
+    if (!prices) return 0;
     let priceVal = null;
     if (domainName.endsWith('.com')) {
       priceVal = prices.domcno?.addnewdomain?.['1'];
@@ -68,10 +78,46 @@ function Domain() {
     } else if (domainName.endsWith('.tech')) {
       priceVal = prices.dottech?.addnewdomain?.['1'];
     }
-    if (priceVal !== undefined && priceVal !== null) {
-      return `₹${Number(priceVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / yr`;
+    return priceVal ? Number(priceVal) : 0;
+  };
+
+  // Helper to extract formatted 1-year price string
+  const getDomainPrice = (domainName) => {
+    const raw = getDomainRawPrice(domainName);
+    if (raw > 0) {
+      return `₹${raw.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / yr`;
     }
     return null;
+  };
+
+  // Cart Management Functions
+  const isInCart = (domainName) => {
+    return cart.some((item) => item.domain === domainName);
+  };
+
+  const addToCart = (domainName) => {
+    const rawPrice = getDomainRawPrice(domainName);
+    const formattedPrice = getDomainPrice(domainName) || 'Price unavailable';
+    const newItem = {
+      domain: domainName,
+      price: rawPrice,
+      priceFormatted: formattedPrice,
+      duration: '1 Year'
+    };
+    const updatedCart = [...cart.filter((item) => item.domain !== domainName), newItem];
+    setCart(updatedCart);
+    sessionStorage.setItem(CART_STORAGE_KEY, JSON.stringify(updatedCart));
+  };
+
+  const removeFromCart = (domainName) => {
+    const updatedCart = cart.filter((item) => item.domain !== domainName);
+    setCart(updatedCart);
+    sessionStorage.setItem(CART_STORAGE_KEY, JSON.stringify(updatedCart));
+  };
+
+  const clearCart = () => {
+    setCart([]);
+    sessionStorage.removeItem(CART_STORAGE_KEY);
   };
 
   // 2. Fetch data from browser cache memory
@@ -208,6 +254,8 @@ function Domain() {
     });
   };
 
+  const totalCartAmount = cart.reduce((sum, item) => sum + (item.price || 0), 0);
+
   return (
     <div>
       <h2>ResellerClub Credentials Configuration</h2>
@@ -273,12 +321,15 @@ function Domain() {
                 <th>Domain Name</th>
                 <th>Status</th>
                 <th>Price / Year</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {getOrderedResults().map(([domain, details]) => {
                 const isAvailable = details?.status === 'available';
                 const priceFormatted = getDomainPrice(domain);
+                const itemInCart = isInCart(domain);
+
                 return (
                   <tr key={domain}>
                     <td>{domain}</td>
@@ -287,6 +338,21 @@ function Domain() {
                     </td>
                     <td>
                       {isAvailable ? (priceFormatted || 'Loading price...') : '—'}
+                    </td>
+                    <td>
+                      {isAvailable ? (
+                        itemInCart ? (
+                          <button type="button" onClick={() => removeFromCart(domain)}>
+                            Remove From Cart
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => addToCart(domain)}>
+                            Add to Cart
+                          </button>
+                        )
+                      ) : (
+                        '—'
+                      )}
                     </td>
                   </tr>
                 );
@@ -308,10 +374,57 @@ function Domain() {
 
           <br />
           <button type="button" onClick={clearBrowserCache}>
-            Clear Cache Memory
+            Clear Search Cache
           </button>
         </div>
       )}
+
+      <hr />
+
+      {/* Shopping Cart Section */}
+      <section>
+        <h2>Shopping Cart ({cart.length} item{cart.length === 1 ? '' : 's'})</h2>
+
+        {cart.length === 0 ? (
+          <p>Your cart is empty. Search for available domains above to add them to your cart.</p>
+        ) : (
+          <div>
+            <table border="1" cellPadding="6">
+              <thead>
+                <tr>
+                  <th>Domain Name</th>
+                  <th>Duration</th>
+                  <th>Price</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cart.map((item) => (
+                  <tr key={item.domain}>
+                    <td>{item.domain}</td>
+                    <td>{item.duration}</td>
+                    <td>{item.priceFormatted}</td>
+                    <td>
+                      <button type="button" onClick={() => removeFromCart(item.domain)}>
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <p>
+              <strong>Total Amount: </strong>
+              ₹{totalCartAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+
+            <button type="button" onClick={clearCart}>
+              Clear Cart
+            </button>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
