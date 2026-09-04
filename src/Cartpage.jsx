@@ -4,12 +4,25 @@ const CART_STORAGE_KEY = 'leela_cart_cache';
 
 function Cartpage({ onBackToSearch }) {
   const [cartItems, setCartItems] = useState([]);
-  const [orderCompleteMessage, setOrderCompleteMessage] = useState('');
+  const [razorpayKey, setRazorpayKey] = useState(() => localStorage.getItem('razorpay_key_id') || 'rzp_test_TXzxXWJQh1pGh0');
+  const [paymentSuccessData, setPaymentSuccessData] = useState(null);
+  const [paymentError, setPaymentError] = useState('');
 
-  // 1. Read all saved items directly from browser cache memory
+  // 1. Load Razorpay script and cart data on component mount
   useEffect(() => {
     loadCartFromCache();
+    loadRazorpayScript();
   }, []);
+
+  const loadRazorpayScript = () => {
+    if (!document.getElementById('razorpay-checkout-sdk')) {
+      const script = document.createElement('script');
+      script.id = 'razorpay-checkout-sdk';
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  };
 
   const loadCartFromCache = () => {
     try {
@@ -31,16 +44,68 @@ function Cartpage({ onBackToSearch }) {
     sessionStorage.setItem(CART_STORAGE_KEY, JSON.stringify(updated));
   };
 
-  const handleCompletePurchase = () => {
+  const totalBill = cartItems.reduce((sum, item) => sum + (item.price || 0), 0);
+
+  const handlePayWithRazorpay = () => {
+    setPaymentError('');
+    setPaymentSuccessData(null);
+
     if (cartItems.length === 0) {
-      alert('Your cart is empty!');
+      setPaymentError('Your cart is empty.');
       return;
     }
-    const total = cartItems.reduce((sum, item) => sum + (item.price || 0), 0);
-    setOrderCompleteMessage(`Order placed successfully for Total Bill: ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Mock Order Confirmed).`);
-  };
 
-  const totalBill = cartItems.reduce((sum, item) => sum + (item.price || 0), 0);
+    const currentKey = razorpayKey.trim() || 'rzp_test_TXzxXWJQh1pGh0';
+
+    if (!window.Razorpay) {
+      setPaymentError('Razorpay Checkout SDK is still loading. Please check your internet connection and try again.');
+      return;
+    }
+
+    // Convert INR to Paise (1 INR = 100 Paise)
+    const amountInPaise = Math.round(totalBill * 100);
+
+    const options = {
+      key: currentKey,
+      amount: amountInPaise,
+      currency: 'INR',
+      name: 'Leela Domain Store',
+      description: `Domain Purchase for ${cartItems.map((i) => i.domain).join(', ')}`,
+      handler: function (response) {
+        // Payment success callback from Razorpay
+        const successInfo = {
+          paymentId: response.razorpay_payment_id,
+          amountPaid: totalBill,
+          purchasedDomains: cartItems.map((i) => i.domain),
+          timestamp: new Date().toLocaleTimeString()
+        };
+        setPaymentSuccessData(successInfo);
+
+        // Clear cart cache memory upon successful payment
+        sessionStorage.removeItem(CART_STORAGE_KEY);
+        setCartItems([]);
+      },
+      prefill: {
+        name: 'Demo Customer',
+        email: 'customer@example.com',
+        contact: '9999999999'
+      },
+      notes: {
+        domains: cartItems.map((i) => i.domain).join(',')
+      },
+      theme: {
+        color: '#3399cc'
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+
+    rzp.on('payment.failed', function (response) {
+      setPaymentError(`Payment failed: ${response.error?.description || 'Declined'} (Reason: ${response.error?.reason || 'Transaction error'})`);
+    });
+
+    rzp.open();
+  };
 
   return (
     <div>
@@ -49,16 +114,27 @@ function Cartpage({ onBackToSearch }) {
       </button>
 
       <h2>Checkout & Order Summary</h2>
-      <p>Review the items saved in your cart before completing the purchase.</p>
+      <p>Review the items saved in your cart before completing payment.</p>
 
-      {cartItems.length === 0 ? (
+      {/* Razorpay Key Identifier Info */}
+      <div>
+        <p>
+          <small>Razorpay Test Key: <code>{razorpayKey}</code></small>
+        </p>
+      </div>
+
+      <hr />
+
+      {cartItems.length === 0 && !paymentSuccessData ? (
         <div>
           <p>There are currently no items in your cart cache memory.</p>
           <button type="button" onClick={onBackToSearch}>
             Search Domains
           </button>
         </div>
-      ) : (
+      ) : null}
+
+      {cartItems.length > 0 && (
         <div>
           <table border="1" cellPadding="8">
             <thead>
@@ -95,17 +171,34 @@ function Cartpage({ onBackToSearch }) {
 
           <br />
 
-          {/* Dummy Complete Purchase Button */}
-          <button type="button" onClick={handleCompletePurchase}>
-            Complete Purchase
+          {/* Pay With Razorpay Button */}
+          <button type="button" onClick={handlePayWithRazorpay}>
+            Pay Now with Razorpay &rarr;
           </button>
 
-          {orderCompleteMessage && (
+          {paymentError && (
             <div>
               <br />
-              <p><strong>Status:</strong> {orderCompleteMessage}</p>
+              <p><strong>Payment Error:</strong> {paymentError}</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Payment Success Confirmation Display */}
+      {paymentSuccessData && (
+        <div>
+          <br />
+          <hr />
+          <h2>Payment Successful!</h2>
+          <p><strong>Razorpay Payment ID:</strong> {paymentSuccessData.paymentId}</p>
+          <p><strong>Amount Paid:</strong> ₹{paymentSuccessData.amountPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <p><strong>Domains Purchased:</strong> {paymentSuccessData.purchasedDomains.join(', ')}</p>
+          <p><strong>Time:</strong> {paymentSuccessData.timestamp}</p>
+          <p><em>(Status: Payment verified. Ready to register domains on ResellerClub).</em></p>
+          <button type="button" onClick={onBackToSearch}>
+            Search More Domains
+          </button>
         </div>
       )}
     </div>
