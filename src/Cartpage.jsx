@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const CART_STORAGE_KEY = 'leela_cart_cache';
 
-function Cartpage({ onBackToSearch }) {
+function Cartpage({ onBackToSearch, onProceedToOwnership }) {
   const [cartItems, setCartItems] = useState([]);
   const [razorpayKey, setRazorpayKey] = useState(() => localStorage.getItem('razorpay_key_id') || 'rzp_test_TXzxXWJQh1pGh0');
   const [paymentSuccessData, setPaymentSuccessData] = useState(null);
@@ -117,7 +117,9 @@ function Cartpage({ onBackToSearch }) {
   };
 
   const handleTakeOwnership = () => {
-    alert('Take Ownership initiated! (Next step: Calling ResellerClub domain registration API)');
+    if (onProceedToOwnership) {
+      onProceedToOwnership();
+    }
   };
 
   return (

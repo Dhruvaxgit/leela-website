@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Domain from './Domain.jsx';
 import Cartpage from './Cartpage.jsx';
+import RegistrantForm from './RegistrantForm.jsx';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('search');
@@ -9,10 +10,17 @@ function App() {
     <div>
       <h1>Leela</h1>
       <hr />
-      {currentPage === 'search' ? (
+      {currentPage === 'search' && (
         <Domain onProceedToCheckout={() => setCurrentPage('cart')} />
-      ) : (
-        <Cartpage onBackToSearch={() => setCurrentPage('search')} />
+      )}
+      {currentPage === 'cart' && (
+        <Cartpage
+          onBackToSearch={() => setCurrentPage('search')}
+          onProceedToOwnership={() => setCurrentPage('registrant')}
+        />
+      )}
+      {currentPage === 'registrant' && (
+        <RegistrantForm onBackToCart={() => setCurrentPage('cart')} />
       )}
     </div>
   );
