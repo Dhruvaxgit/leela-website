@@ -71,8 +71,14 @@ function Cartpage({ onBackToSearch }) {
       currency: 'INR',
       name: 'Leela Domain Store',
       description: `Domain Purchase for ${cartItems.map((i) => i.domain).join(', ')}`,
+      modal: {
+        ondismiss: function () {
+          // Situation 3: Pending / User Cancelled without completing
+          setPaymentError('Payment pending or cancelled. Check payment and try again.');
+        }
+      },
       handler: function (response) {
-        // Payment success callback from Razorpay
+        // Situation 1: Payment Success
         const successInfo = {
           paymentId: response.razorpay_payment_id,
           amountPaid: totalBill,
@@ -80,6 +86,7 @@ function Cartpage({ onBackToSearch }) {
           timestamp: new Date().toLocaleTimeString()
         };
         setPaymentSuccessData(successInfo);
+        setPaymentError('');
 
         // Clear cart cache memory upon successful payment
         sessionStorage.removeItem(CART_STORAGE_KEY);
@@ -101,10 +108,16 @@ function Cartpage({ onBackToSearch }) {
     const rzp = new window.Razorpay(options);
 
     rzp.on('payment.failed', function (response) {
-      setPaymentError(`Payment failed: ${response.error?.description || 'Declined'} (Reason: ${response.error?.reason || 'Transaction error'})`);
+      // Situation 2: Payment Failure
+      const reason = response.error?.description || 'Declined by bank';
+      setPaymentError(`Payment failed (${reason}). Check payment and try again.`);
     });
 
     rzp.open();
+  };
+
+  const handleTakeOwnership = () => {
+    alert('Take Ownership initiated! (Next step: Calling ResellerClub domain registration API)');
   };
 
   return (
@@ -179,7 +192,7 @@ function Cartpage({ onBackToSearch }) {
           {paymentError && (
             <div>
               <br />
-              <p><strong>Payment Error:</strong> {paymentError}</p>
+              <p><strong>Notice:</strong> {paymentError}</p>
             </div>
           )}
         </div>
@@ -195,7 +208,15 @@ function Cartpage({ onBackToSearch }) {
           <p><strong>Amount Paid:</strong> ₹{paymentSuccessData.amountPaid.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           <p><strong>Domains Purchased:</strong> {paymentSuccessData.purchasedDomains.join(', ')}</p>
           <p><strong>Time:</strong> {paymentSuccessData.timestamp}</p>
-          <p><em>(Status: Payment verified. Ready to register domains on ResellerClub).</em></p>
+
+          <br />
+
+          {/* TAKE OWNERSHIP BUTTON - Visible ONLY upon successful payment */}
+          <button type="button" onClick={handleTakeOwnership}>
+            Take Ownership &rarr;
+          </button>
+
+          <span> </span>
           <button type="button" onClick={onBackToSearch}>
             Search More Domains
           </button>
