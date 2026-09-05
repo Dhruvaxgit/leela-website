@@ -93,7 +93,14 @@ function Purchasecompletionpage({ onBackToForm }) {
       }
 
       // Handle Case: Customer with this email already exists
-      if (data?.status === 'ERROR' && typeof data?.message === 'string' && data.message.toLowerCase().includes('already exists')) {
+      const msgLower = (data?.message || '').toLowerCase();
+      const isAlreadyCustomer = data?.status === 'ERROR' && (
+        msgLower.includes('already a customer') ||
+        msgLower.includes('already exists') ||
+        msgLower.includes('already registered')
+      );
+
+      if (isAlreadyCustomer) {
         setStatusMessage('Email already registered in ResellerClub. Looking up existing customer ID...');
         const lookupUrl = `/api/customers/details.json?auth-userid=${authUserId.trim()}&api-key=${apiKey.trim()}&username=${encodeURIComponent(formData.email.trim().toLowerCase())}`;
         const lookupRes = await fetch(lookupUrl);
