@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const REGISTRANT_STORAGE_KEY = 'leela_registrant_cache';
 
-function RegistrantForm({ onBackToCart }) {
+function RegistrantForm({ onBackToCart, onProceedToCompletion }) {
   const [formData, setFormData] = useState(() => {
     try {
       const saved = sessionStorage.getItem(REGISTRANT_STORAGE_KEY);
@@ -62,7 +62,10 @@ function RegistrantForm({ onBackToCart }) {
 
     // Save into browser cache memory
     sessionStorage.setItem(REGISTRANT_STORAGE_KEY, JSON.stringify(formData));
-    setSavedNotice('Contact information & account password saved successfully in cache memory! (Next step: Calling ResellerClub API to complete registration).');
+    setSavedNotice('Contact information & account password saved successfully in cache memory!');
+    if (onProceedToCompletion) {
+      onProceedToCompletion();
+    }
   };
 
   return (

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Domain from './Domain.jsx';
 import Cartpage from './Cartpage.jsx';
 import RegistrantForm from './RegistrantForm.jsx';
+import Purchasecompletionpage from './Purchasecompletionpage.jsx';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('search');
@@ -20,7 +21,15 @@ function App() {
         />
       )}
       {currentPage === 'registrant' && (
-        <RegistrantForm onBackToCart={() => setCurrentPage('cart')} />
+        <RegistrantForm
+          onBackToCart={() => setCurrentPage('cart')}
+          onProceedToCompletion={() => setCurrentPage('completion')}
+        />
+      )}
+      {currentPage === 'completion' && (
+        <Purchasecompletionpage
+          onBackToForm={() => setCurrentPage('registrant')}
+        />
       )}
     </div>
   );
