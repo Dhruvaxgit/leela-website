@@ -59,9 +59,13 @@ function Purchasecompletionpage({ onBackToForm }) {
         'lang-pref': 'en'
       });
 
-      // 4. Make real HTTP POST request to ResellerClub Customer Signup API
-      const response = await fetch(`/api/customers/v2/signup.json?${params.toString()}`, {
-        method: 'POST'
+      // 4. Make real HTTP POST request with parameters in body (prevents Cloudflare WAF query-string block)
+      const response = await fetch('/api/customers/v2/signup.json', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params.toString()
       });
 
       const responseText = await response.text();
