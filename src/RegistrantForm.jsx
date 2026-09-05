@@ -55,8 +55,19 @@ function RegistrantForm({ onBackToCart, onProceedToCompletion }) {
       return;
     }
 
-    if (formData.password.length < 8) {
-      alert('Password must be at least 8 characters long as required by ResellerClub.');
+    const pwd = formData.password.trim();
+    if (pwd.length < 9 || pwd.length > 16) {
+      alert('ResellerClub requires password length to be between 9 and 16 characters.');
+      return;
+    }
+
+    const hasUpper = /[A-Z]/.test(pwd);
+    const hasLower = /[a-z]/.test(pwd);
+    const hasNumber = /[0-9]/.test(pwd);
+    const hasSpecial = /[~*!@$#%_+.?:,{}]/.test(pwd);
+
+    if (!hasUpper || !hasLower || !hasNumber || !hasSpecial) {
+      alert('Password does not match criteria! It must include at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character (~*!@$#%_+.?:,{}).');
       return;
     }
 
@@ -146,7 +157,7 @@ function RegistrantForm({ onBackToCart, onProceedToCompletion }) {
             />
           </label>
           <br />
-          <small>(Required for domain management sub-account. Min 8 characters with letters, numbers & symbols).</small>
+          <small>(ResellerClub Criteria: 9–16 characters, with at least 1 uppercase, 1 lowercase, 1 number, and 1 special symbol like @, #, $, !).</small>
         </div>
 
         <br />
