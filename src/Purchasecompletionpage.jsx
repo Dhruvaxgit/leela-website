@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 
 const REGISTRANT_STORAGE_KEY = 'leela_registrant_cache';
 const CUSTOMER_ID_STORAGE_KEY = 'leela_customer_id';
@@ -12,27 +12,66 @@ function Purchasecompletionpage({ onBackToForm }) {
   const [call1SignupResponse, setCall1SignupResponse] = useState(null);
   const [call1LookupResponse, setCall1LookupResponse] = useState(null);
   const [call2Response, setCall2Response] = useState(null);
-  const [call3Responses, setCall3Responses] = useState(null);
-  const [insufficientFundsNotice, setInsufficientFundsNotice] = useState('');
-  const [refundRequiredDomains, setRefundRequiredDomains] = useState([]);
-  const [registrationSuccessList, setRegistrationSuccessList] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // 1. The Core Data Model: The Domain Queue
+  const [domainQueue, setDomainQueue] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('leela_purchased_domains');
+      const list = saved ? JSON.parse(saved) : [];
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((d) => ({
+          domain: d,
+          status: 'pending', // 'pending' | 'processing' | 'success' | 'snatched' | 'insufficient_funds' | 'error'
+          orderId: null,
+          details: 'Waiting in queue...',
+          rawResponse: null
+        }));
+      }
+    } catch {}
+
+    // Fallback if no cart saved (e.g. direct test)
+    const searchCache = sessionStorage.getItem('domain_search_cache');
+    if (searchCache) {
+      try {
+        const parsed = JSON.parse(searchCache);
+        if (parsed.searchedQuery) {
+          return [{
+            domain: `${parsed.searchedQuery}.tech`,
+            status: 'pending',
+            orderId: null,
+            details: 'Waiting in queue...',
+            rawResponse: null
+          }];
+        }
+      } catch {}
+    }
+
+    return [{
+      domain: 'leelatestbrand2026.tech',
+      status: 'pending',
+      orderId: null,
+      details: 'Waiting in queue...',
+      rawResponse: null
+    }];
+  });
+
   useEffect(() => {
-    executeCall1();
+    executePipeline();
   }, []);
 
-  const executeCall1 = async () => {
+  const executePipeline = async () => {
     setError('');
     setLoading(true);
     setProgress(0);
     setCall1SignupResponse(null);
     setCall1LookupResponse(null);
+    setCall2Response(null);
     setStatusMessage('Executing Call 1: Sending customer details to ResellerClub (/api/customers/v2/signup.json)...');
 
     try {
-      // 1. Read Reseller credentials from storage
+      // Step A: Read Reseller credentials from storage
       const authUserId = localStorage.getItem('rc_auth_userid') || '1336094';
       const apiKey = localStorage.getItem('rc_api_key') || '';
 
@@ -40,19 +79,19 @@ function Purchasecompletionpage({ onBackToForm }) {
         throw new Error('Reseller credentials (User ID or API Key) missing. Please configure them on the search page.');
       }
 
-      // 2. Read Registrant details from browser cache memory
+      // Step B: Read Registrant details from browser cache memory
       const savedRegistrant = sessionStorage.getItem(REGISTRANT_STORAGE_KEY);
       if (!savedRegistrant) {
         throw new Error('Customer contact details missing from cache memory. Please return to the form.');
       }
       const formData = JSON.parse(savedRegistrant);
 
-      // 3. Clean & Sanitize parameters
+      // Step C: Call 1 - Customer Creation / Lookup
       const cleanPhoneCc = String(formData.phoneCountryCode || '91').replace(/\D/g, '');
       const cleanPhone = String(formData.phone || '').replace(/\D/g, '');
       const cleanCountry = String(formData.country || 'IN').trim().toUpperCase();
 
-      const params = new URLSearchParams({
+      const signupParams = new URLSearchParams({
         'auth-userid': authUserId.trim(),
         'api-key': apiKey.trim(),
         'username': formData.email.trim().toLowerCase(),
@@ -69,89 +108,62 @@ function Purchasecompletionpage({ onBackToForm }) {
         'lang-pref': 'en'
       });
 
-      // 4. Make real HTTP POST request with parameters in body (prevents Cloudflare WAF query-string block)
-      const response = await fetch('/api/customers/v2/signup.json', {
+      const signupRes = await fetch('/api/customers/v2/signup.json', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: params.toString()
+        body: signupParams.toString()
       });
 
-      const responseText = await response.text();
-      let data;
+      const signupText = await signupRes.text();
+      let signupData;
       try {
-        data = JSON.parse(responseText);
+        signupData = JSON.parse(signupText);
       } catch {
-        data = responseText;
+        signupData = signupText;
       }
 
-      setCall1SignupResponse(data);
+      setCall1SignupResponse(signupData);
 
-      // Check if ResellerClub returned a numeric customer ID (Direct Success)
-      const isNumericId = typeof data === 'number' || (!isNaN(data) && Number(data) > 0);
+      let resolvedCustomerId = null;
+      const isNumericId = typeof signupData === 'number' || (!isNaN(signupData) && Number(signupData) > 0);
 
       if (isNumericId) {
-        const idStr = String(data).trim();
-        setCustomerId(idStr);
-        sessionStorage.setItem(CUSTOMER_ID_STORAGE_KEY, idStr);
-        // Rule: Complete progress bar by 25% on Call 1 success
-        setProgress(25);
-        // Automatically start Call 2 with resolved customer ID
-        await executeCall2(idStr, formData, authUserId, apiKey);
-        return;
-      }
+        resolvedCustomerId = String(signupData).trim();
+      } else {
+        // Handle Case: Customer with this email already exists
+        const msgLower = (signupData?.message || '').toLowerCase();
+        const isAlreadyCustomer = signupData?.status === 'ERROR' && (
+          msgLower.includes('already a customer') ||
+          msgLower.includes('already exists') ||
+          msgLower.includes('already registered')
+        );
 
-      // Handle Case: Customer with this email already exists
-      const msgLower = (data?.message || '').toLowerCase();
-      const isAlreadyCustomer = data?.status === 'ERROR' && (
-        msgLower.includes('already a customer') ||
-        msgLower.includes('already exists') ||
-        msgLower.includes('already registered')
-      );
+        if (isAlreadyCustomer) {
+          setStatusMessage('Email already registered in ResellerClub. Looking up existing customer ID...');
+          const lookupUrl = `/api/customers/details.json?auth-userid=${authUserId.trim()}&api-key=${apiKey.trim()}&username=${encodeURIComponent(formData.email.trim().toLowerCase())}`;
+          const lookupRes = await fetch(lookupUrl);
+          const lookupData = await lookupRes.json();
+          setCall1LookupResponse(lookupData);
 
-      if (isAlreadyCustomer) {
-        setStatusMessage('Email already registered in ResellerClub. Looking up existing customer ID...');
-        const lookupUrl = `/api/customers/details.json?auth-userid=${authUserId.trim()}&api-key=${apiKey.trim()}&username=${encodeURIComponent(formData.email.trim().toLowerCase())}`;
-        const lookupRes = await fetch(lookupUrl);
-        const lookupData = await lookupRes.json();
-
-        setCall1LookupResponse(lookupData);
-
-        if (lookupData?.customerid) {
-          const existingId = String(lookupData.customerid).trim();
-          setCustomerId(existingId);
-          sessionStorage.setItem(CUSTOMER_ID_STORAGE_KEY, existingId);
-          // Rule: Complete progress bar by 25% on Call 1 success
-          setProgress(25);
-          // Automatically start Call 2 with resolved customer ID
-          await executeCall2(existingId, formData, authUserId, apiKey);
-          return;
+          if (lookupData?.customerid) {
+            resolvedCustomerId = String(lookupData.customerid).trim();
+          }
         }
       }
 
-      // If ResellerClub returned an explicit API Error
-      if (data?.status === 'ERROR' || data?.status === 'error') {
-        throw new Error(data.message || 'ResellerClub API Error');
+      if (!resolvedCustomerId) {
+        throw new Error(signupData?.message || 'Failed to resolve ResellerClub customer account');
       }
 
-      throw new Error('Unexpected response format received from ResellerClub');
+      setCustomerId(resolvedCustomerId);
+      sessionStorage.setItem(CUSTOMER_ID_STORAGE_KEY, resolvedCustomerId);
+      // Advance to 25% on Call 1 completion
+      setProgress(25);
+      setStatusMessage(`Call 1 Succeeded (25%): Customer ID ${resolvedCustomerId} verified. Starting Call 2...`);
 
-    } catch (err) {
-      setError(`Process Failed: ${err.message}`);
-      setStatusMessage('Process Stopped. Action required.');
-      setLoading(false);
-    }
-  };
-
-  const executeCall2 = async (resolvedCustomerId, formData, authUserId, apiKey) => {
-    setStatusMessage('Call 1 Succeeded (25%). Executing Call 2: Creating WHOIS Contact Card (/api/contacts/add.json)...');
-
-    try {
-      const cleanPhoneCc = String(formData.phoneCountryCode || '91').replace(/\D/g, '');
-      const cleanPhone = String(formData.phone || '').replace(/\D/g, '');
-      const cleanCountry = String(formData.country || 'IN').trim().toUpperCase();
-
+      // Step D: Call 2 - Create / Verify WHOIS Contact
       const contactParams = new URLSearchParams({
         'auth-userid': authUserId.trim(),
         'api-key': apiKey.trim(),
@@ -169,7 +181,7 @@ function Purchasecompletionpage({ onBackToForm }) {
         'type': 'Contact'
       });
 
-      const response = await fetch('/api/contacts/add.json', {
+      const contactRes = await fetch('/api/contacts/add.json', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
@@ -177,116 +189,83 @@ function Purchasecompletionpage({ onBackToForm }) {
         body: contactParams.toString()
       });
 
-      const responseText = await response.text();
-      let data;
+      const contactText = await contactRes.text();
+      let contactData;
       try {
-        data = JSON.parse(responseText);
+        contactData = JSON.parse(contactText);
       } catch {
-        data = responseText;
+        contactData = contactText;
       }
 
-      setCall2Response(data);
+      setCall2Response(contactData);
+      let resolvedContactId = null;
 
-      const isNumericContactId = typeof data === 'number' || (!isNaN(data) && Number(data) > 0);
-
+      const isNumericContactId = typeof contactData === 'number' || (!isNaN(contactData) && Number(contactData) > 0);
       if (isNumericContactId) {
-        const contactIdStr = String(data).trim();
-        setContactId(contactIdStr);
-        sessionStorage.setItem(CONTACT_ID_STORAGE_KEY, contactIdStr);
-        // Rule: Complete progress bar by 50% on Call 2 success
-        setProgress(50);
-        // Trigger Call 3 immediately!
-        await executeCall3(resolvedCustomerId, contactIdStr, authUserId, apiKey);
-        return;
+        resolvedContactId = String(contactData).trim();
+      } else {
+        // Fallback to default contact
+        const defaultParams = new URLSearchParams({
+          'auth-userid': authUserId.trim(),
+          'api-key': apiKey.trim(),
+          'customer-id': resolvedCustomerId,
+          'type': 'Contact'
+        });
+        const defaultRes = await fetch('/api/contacts/default.json', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: defaultParams.toString()
+        });
+        const defaultData = await defaultRes.json();
+        const existingContactId = defaultData?.Contact?.registrant || defaultData?.Contact?.techContactDetails?.['contact.contactid'];
+        if (existingContactId) {
+          resolvedContactId = String(existingContactId).trim();
+          setCall2Response(defaultData);
+        }
       }
 
-      // Check fallback for existing default contact
-      const defaultParams = new URLSearchParams({
-        'auth-userid': authUserId.trim(),
-        'api-key': apiKey.trim(),
-        'customer-id': resolvedCustomerId,
-        'type': 'Contact'
-      });
-
-      const defaultRes = await fetch('/api/contacts/default.json', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: defaultParams.toString()
-      });
-
-      const defaultData = await defaultRes.json();
-      const existingContactId = defaultData?.Contact?.registrant || defaultData?.Contact?.techContactDetails?.['contact.contactid'];
-
-      if (existingContactId) {
-        const contactIdStr = String(existingContactId).trim();
-        setContactId(contactIdStr);
-        sessionStorage.setItem(CONTACT_ID_STORAGE_KEY, contactIdStr);
-        // Rule: Complete progress bar by 50% on Call 2 success
-        setProgress(50);
-        setCall2Response(defaultData);
-        // Trigger Call 3 immediately!
-        await executeCall3(resolvedCustomerId, contactIdStr, authUserId, apiKey);
-        return;
+      if (!resolvedContactId) {
+        throw new Error(contactData?.message || 'Failed to resolve ResellerClub WHOIS contact ID');
       }
 
-      if (data?.status === 'ERROR' || data?.status === 'error') {
-        throw new Error(data.message || 'ResellerClub Contact API Error');
-      }
+      setContactId(resolvedContactId);
+      sessionStorage.setItem(CONTACT_ID_STORAGE_KEY, resolvedContactId);
+      // Advance to 50% on Call 2 completion
+      setProgress(50);
+      setStatusMessage(`Call 2 Succeeded (50%): WHOIS Contact ID ${resolvedContactId} verified. Starting Call 3 Queue...`);
 
-      throw new Error('Unexpected response format received from Contact API');
+      // Step E: Call 3 - Process the Domain Queue Sequentially (One by One)
+      await executeCall3Queue(resolvedCustomerId, resolvedContactId, authUserId, apiKey);
 
     } catch (err) {
-      setError(`Call 2 Failed: ${err.message}`);
-      setStatusMessage('Call 2 Stopped. Action required.');
+      setError(`Process Failed: ${err.message}`);
+      setStatusMessage('Process Stopped. Action required.');
       setLoading(false);
     }
   };
 
-  const executeCall3 = async (resolvedCustomerId, resolvedContactId, authUserId, apiKey) => {
-    setStatusMessage('Call 2 Succeeded (50%). Executing Call 3: Registering Domain at Registry (/api/domains/register.json)...');
-    setInsufficientFundsNotice('');
-    setRefundRequiredDomains([]);
-    setRegistrationSuccessList([]);
+  const executeCall3Queue = async (resolvedCustomerId, resolvedContactId, authUserId, apiKey) => {
+    const queueSnapshot = [...domainQueue];
+    const totalItems = queueSnapshot.length;
+    const progressPerDomain = 50 / totalItems; // Divide remaining 50% across cart items
+    let currentProgress = 50;
 
-    try {
-      // 1. Retrieve purchased domains from cache
-      const savedDomains = sessionStorage.getItem('leela_purchased_domains');
-      let domainList = [];
+    for (let i = 0; i < totalItems; i++) {
+      const currentItem = queueSnapshot[i];
+      const domainName = currentItem.domain;
+
+      // Update current item to 'processing'
+      queueSnapshot[i] = {
+        ...queueSnapshot[i],
+        status: 'processing',
+        details: 'Contacting registry & executing registration...'
+      };
+      setDomainQueue([...queueSnapshot]);
+      setStatusMessage(`Processing domain ${i + 1} of ${totalItems}: ${domainName}...`);
+
       try {
-        domainList = savedDomains ? JSON.parse(savedDomains) : [];
-      } catch {
-        domainList = [];
-      }
-
-      // If no domain in cart cache (e.g. direct test), check search cache
-      if (domainList.length === 0) {
-        const searchCache = sessionStorage.getItem('domain_search_cache');
-        if (searchCache) {
-          try {
-            const parsedSearch = JSON.parse(searchCache);
-            if (parsedSearch.searchedQuery) {
-              domainList = [`${parsedSearch.searchedQuery}.tech`];
-            }
-          } catch {}
-        }
-      }
-
-      if (domainList.length === 0) {
-        domainList = ['leelatestbrand2026.tech'];
-      }
-
-      const resultsMap = {};
-      const successes = [];
-      const refunds = [];
-      let fundsErrorFound = false;
-
-      // 2. Process each domain sequentially (one at a time)
-      for (let i = 0; i < domainList.length; i++) {
-        const domainName = domainList[i];
-        setStatusMessage(`Executing Call 3: Registering "${domainName}" (${i + 1}/${domainList.length})...`);
-
         const registerParams = new URLSearchParams();
         registerParams.append('auth-userid', authUserId.trim());
         registerParams.append('api-key', apiKey.trim());
@@ -303,7 +282,7 @@ function Purchasecompletionpage({ onBackToForm }) {
         registerParams.append('purchase-privacy', 'false');
         registerParams.append('auto-renew', 'false');
 
-        const response = await fetch('/api/domains/register.json', {
+        const regRes = await fetch('/api/domains/register.json', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -311,59 +290,84 @@ function Purchasecompletionpage({ onBackToForm }) {
           body: registerParams.toString()
         });
 
-        const responseText = await response.text();
-        let data;
+        const regText = await regRes.text();
+        let regData;
         try {
-          data = JSON.parse(responseText);
+          regData = JSON.parse(regText);
         } catch {
-          data = responseText;
+          regData = regText;
         }
 
-        resultsMap[domainName] = data;
+        const msgLower = (regData?.message || '').toLowerCase();
 
-        const msgLower = (data?.message || '').toLowerCase();
-
-        // Scenario A: Genuine Registration Success
-        if (data?.status === 'Success' || data?.actionstatus === 'Success') {
-          successes.push({
-            domain: domainName,
-            orderId: data.entityid || data.orderid || 'Confirmed'
-          });
+        // 1. Scenario A: Registration Success
+        if (regData?.status === 'Success' || regData?.actionstatus === 'Success') {
+          const orderId = regData.entityid || regData.orderid || 'Confirmed';
+          queueSnapshot[i] = {
+            ...queueSnapshot[i],
+            status: 'success',
+            orderId: orderId,
+            details: `Registered! ResellerClub Order ID: ${orderId}`,
+            rawResponse: regData
+          };
+          currentProgress += progressPerDomain;
+          setProgress(Math.min(100, Math.round(currentProgress)));
         }
-        // Scenario B: Insufficient Funds in Wallet
+        // 2. Scenario B: Insufficient Funds in ResellerClub Wallet
         else if (msgLower.includes('sufficient funds') || msgLower.includes('funds') || msgLower.includes('balance')) {
-          fundsErrorFound = true;
+          queueSnapshot[i] = {
+            ...queueSnapshot[i],
+            status: 'insufficient_funds',
+            orderId: null,
+            details: 'All parameters & WHOIS verified 100%! Add funds to ResellerClub wallet to finalize registry purchase.',
+            rawResponse: regData
+          };
         }
-        // Scenario C: Domain Taken / Snatched
+        // 3. Scenario C: Domain Snatched / No Longer Available
         else if (msgLower.includes('no longer available') || msgLower.includes('taken') || msgLower.includes('already registered')) {
-          refunds.push(domainName);
+          queueSnapshot[i] = {
+            ...queueSnapshot[i],
+            status: 'snatched',
+            orderId: null,
+            details: 'Domain was taken by another party moments ago. Payment logged for refund.',
+            rawResponse: regData
+          };
         }
+        // 4. Scenario D: Other Registry Error
+        else {
+          queueSnapshot[i] = {
+            ...queueSnapshot[i],
+            status: 'error',
+            orderId: null,
+            details: regData?.message || 'Registration error received from ResellerClub',
+            rawResponse: regData
+          };
+        }
+      } catch (domainErr) {
+        queueSnapshot[i] = {
+          ...queueSnapshot[i],
+          status: 'error',
+          orderId: null,
+          details: `Call failed: ${domainErr.message}`,
+          rawResponse: { error: domainErr.message }
+        };
       }
 
-      setCall3Responses(resultsMap);
-      setRegistrationSuccessList(successes);
-      setRefundRequiredDomains(refunds);
-
-      // Handle UI feedback based on results
-      if (successes.length > 0) {
-        setProgress(100);
-        setStatusMessage(`All Actions Completed (100%): Domain ${successes.map((s) => s.domain).join(', ')} registered successfully!`);
-      } else if (fundsErrorFound) {
-        setInsufficientFundsNotice('All parameters, customer ID, and WHOIS contact were verified 100%! To finalize live purchase on the global registry, add funds to your ResellerClub wallet.');
-        setStatusMessage('Call 3 Verified: ResellerClub validated all credentials. Wallet funds required for live purchase.');
-      } else if (refunds.length > 0) {
-        setStatusMessage('Domain is no longer available. Refund Required.');
-      } else {
-        setStatusMessage('Call 3 finished with response from ResellerClub.');
-      }
-
-      setLoading(false);
-
-    } catch (err) {
-      setError(`Call 3 Failed: ${err.message}`);
-      setStatusMessage('Call 3 Stopped. Action required.');
-      setLoading(false);
+      // Update state live on screen after each domain completes
+      setDomainQueue([...queueSnapshot]);
+      // Note: Loop does NOT break on error; it immediately proceeds to the next domain!
     }
+
+    // Final summary message
+    const allSucceeded = queueSnapshot.every((item) => item.status === 'success');
+    if (allSucceeded) {
+      setProgress(100);
+      setStatusMessage('All domain registrations completed successfully (100%)!');
+    } else {
+      setStatusMessage('Batch registration sequence finished. Review the status checklist below.');
+    }
+
+    setLoading(false);
   };
 
   return (
@@ -393,26 +397,19 @@ function Purchasecompletionpage({ onBackToForm }) {
       {/* Current Status Message */}
       <p><strong>Status:</strong> {statusMessage}</p>
 
-      {/* Customer ID Display upon Call 1 Success */}
+      {/* Customer ID & Contact ID Display */}
       {customerId && (
-        <div>
-          <p><strong>Customer ID:</strong> {customerId}</p>
-        </div>
+        <p><strong>Customer ID:</strong> {customerId}</p>
       )}
-
-      {/* Contact ID Display upon Call 2 Success */}
       {contactId && (
-        <div>
-          <p><strong>WHOIS Contact ID:</strong> {contactId}</p>
-          <p><em>(Call 1 & Call 2 finished. 50% completed. Ready for Call 3: Domain Purchase & Registration).</em></p>
-        </div>
+        <p><strong>WHOIS Contact ID:</strong> {contactId}</p>
       )}
 
       {/* Error Message Display */}
       {error && (
         <div>
           <p><strong>Error Encountered:</strong> {error}</p>
-          <button type="button" onClick={executeCall1}>
+          <button type="button" onClick={executePipeline}>
             Retry Process
           </button>
           <span> </span>
@@ -422,12 +419,81 @@ function Purchasecompletionpage({ onBackToForm }) {
         </div>
       )}
 
-      {/* Raw Response Viewers for Call 1, Lookup, and Call 2 */}
+      <hr />
+
+      {/* 3. The Live Checklist Table UI (Plain Functional HTML) */}
+      <h3>Registration Queue & Execution Checklist</h3>
+      <table border="1" cellPadding="8">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Domain Name</th>
+            <th>Status</th>
+            <th>Details / Order ID</th>
+            <th>Action</th>
+            <th>Inspection</th>
+          </tr>
+        </thead>
+        <tbody>
+          {domainQueue.map((item, index) => {
+            let statusLabel = '⏸️ Waiting in queue';
+            if (item.status === 'processing') statusLabel = '⏳ In Progress...';
+            if (item.status === 'success') statusLabel = '✅ Registered';
+            if (item.status === 'snatched') statusLabel = '⚠️ Snatched';
+            if (item.status === 'insufficient_funds') statusLabel = 'ℹ️ Verified (Funds Required)';
+            if (item.status === 'error') statusLabel = '❌ Error';
+
+            return (
+              <tr key={item.domain}>
+                <td>{index + 1}</td>
+                <td><strong>{item.domain}</strong></td>
+                <td>{statusLabel}</td>
+                <td>{item.details}</td>
+                <td>
+                  {item.status === 'snatched' ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        alert(
+                          'Refund request logged for domain: ' +
+                            item.domain +
+                            ' against Razorpay Payment ID: ' +
+                            (sessionStorage.getItem('leela_last_payment_id') || 'pay_test') +
+                            '. Funds will be credited back to your original payment method.'
+                        )
+                      }
+                    >
+                      Request Refund
+                    </button>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td>
+                  {item.rawResponse ? (
+                    <details>
+                      <summary>View Raw JSON</summary>
+                      <pre>{JSON.stringify(item.rawResponse, null, 2)}</pre>
+                    </details>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      <hr />
+
+      {/* Raw Response Viewers for Call 1 & Call 2 */}
+      <h3>Account & Contact Inspection (Calls 1 & 2)</h3>
+
       {call1SignupResponse && (
         <div>
-          <br />
           <details>
-            <summary>View Raw JSON from Call 1 (/api/customers/v2/signup.json)</summary>
+            <summary>View Raw JSON from Call 1 Signup (/api/customers/v2/signup.json)</summary>
             <pre>{JSON.stringify(call1SignupResponse, null, 2)}</pre>
           </details>
         </div>
@@ -436,8 +502,8 @@ function Purchasecompletionpage({ onBackToForm }) {
       {call1LookupResponse && (
         <div>
           <br />
-          <details open>
-            <summary>View Raw JSON from Call 1b Customer Details Lookup (/api/customers/details.json)</summary>
+          <details>
+            <summary>View Raw JSON from Call 1b Customer Lookup (/api/customers/details.json)</summary>
             <pre>{JSON.stringify(call1LookupResponse, null, 2)}</pre>
           </details>
         </div>
@@ -446,66 +512,9 @@ function Purchasecompletionpage({ onBackToForm }) {
       {call2Response && (
         <div>
           <br />
-          <details open>
-            <summary>View Raw JSON from Call 2 (/api/contacts/add.json)</summary>
+          <details>
+            <summary>View Raw JSON from Call 2 WHOIS Contact (/api/contacts/add.json)</summary>
             <pre>{JSON.stringify(call2Response, null, 2)}</pre>
-          </details>
-        </div>
-      )}
-
-      {/* Insufficient Funds Production Notice */}
-      {insufficientFundsNotice && (
-        <div>
-          <br />
-          <p><strong>Production Verification Notice:</strong> {insufficientFundsNotice}</p>
-        </div>
-      )}
-
-      {/* Refund Alert for Snatched Domains */}
-      {refundRequiredDomains.length > 0 && (
-        <div>
-          <br />
-          <p><strong>Order Status: Refund Required</strong></p>
-          <p>
-            Domain {refundRequiredDomains.join(', ')} was taken by another party moments ago. Your payment has been logged for auto-refund or choosing an alternative extension.
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              alert(
-                'Refund request logged successfully for payment ID: ' +
-                  (sessionStorage.getItem('leela_last_payment_id') || 'pay_test') +
-                  '. The funds will be credited back to your original payment method.'
-              )
-            }
-          >
-            Request Refund
-          </button>
-        </div>
-      )}
-
-      {/* Registration Success List */}
-      {registrationSuccessList.length > 0 && (
-        <div>
-          <br />
-          <h2>Domain Registration Successful (100%)!</h2>
-          <ul>
-            {registrationSuccessList.map((item) => (
-              <li key={item.domain}>
-                <strong>{item.domain}</strong> — Registered! ResellerClub Order ID: <code>{item.orderId}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Raw Response Viewer for Call 3 Domain Register API */}
-      {call3Responses && (
-        <div>
-          <br />
-          <details open>
-            <summary>View Raw JSON from Call 3 Domain Register API (/api/domains/register.json)</summary>
-            <pre>{JSON.stringify(call3Responses, null, 2)}</pre>
           </details>
         </div>
       )}
