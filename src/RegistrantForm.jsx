@@ -16,7 +16,8 @@ function RegistrantForm({ onBackToCart }) {
         city: '',
         state: '',
         country: 'IN',
-        zipcode: ''
+        zipcode: '',
+        password: ''
       };
     } catch {
       return {
@@ -29,7 +30,8 @@ function RegistrantForm({ onBackToCart }) {
         city: '',
         state: '',
         country: 'IN',
-        zipcode: ''
+        zipcode: '',
+        password: ''
       };
     }
   });
@@ -47,15 +49,20 @@ function RegistrantForm({ onBackToCart }) {
   const handleSaveAndContinue = (e) => {
     e.preventDefault();
 
-    // Basic validation for essential WHOIS fields
-    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.addressLine1.trim() || !formData.city.trim() || !formData.zipcode.trim()) {
-      alert('Please fill in all essential contact details (Name, Email, Phone, Address, City, Zipcode).');
+    // Basic validation for essential WHOIS fields + Password
+    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.addressLine1.trim() || !formData.city.trim() || !formData.zipcode.trim() || !formData.password.trim()) {
+      alert('Please fill in all essential contact details (Name, Email, Password, Phone, Address, City, Zipcode).');
+      return;
+    }
+
+    if (formData.password.length < 8) {
+      alert('Password must be at least 8 characters long as required by ResellerClub.');
       return;
     }
 
     // Save into browser cache memory
     sessionStorage.setItem(REGISTRANT_STORAGE_KEY, JSON.stringify(formData));
-    setSavedNotice('Contact information saved successfully in cache memory! (Next step: Calling ResellerClub API to complete registration).');
+    setSavedNotice('Contact information & account password saved successfully in cache memory! (Next step: Calling ResellerClub API to complete registration).');
   };
 
   return (
@@ -118,6 +125,25 @@ function RegistrantForm({ onBackToCart }) {
               required
             />
           </label>
+        </div>
+
+        <br />
+
+        {/* Account Password */}
+        <div>
+          <label>
+            Account Password:*<br />
+            <input
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="Enter password (min 8 characters)"
+              required
+            />
+          </label>
+          <br />
+          <small>(Required for domain management sub-account. Min 8 characters with letters, numbers & symbols).</small>
         </div>
 
         <br />
