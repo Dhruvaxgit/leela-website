@@ -88,6 +88,10 @@ function Cartpage({ onBackToSearch, onProceedToOwnership }) {
         setPaymentSuccessData(successInfo);
         setPaymentError('');
 
+        // Save purchased domains list for Call 3 domain registration
+        sessionStorage.setItem('leela_purchased_domains', JSON.stringify(cartItems.map((i) => i.domain)));
+        sessionStorage.setItem('leela_last_payment_id', response.razorpay_payment_id);
+
         // Clear cart cache memory upon successful payment
         sessionStorage.removeItem(CART_STORAGE_KEY);
         setCartItems([]);
