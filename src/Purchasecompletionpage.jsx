@@ -7,7 +7,8 @@ function Purchasecompletionpage({ onBackToForm }) {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Initiating Call 1: Customer Account Creation...');
   const [customerId, setCustomerId] = useState(null);
-  const [rawResponse, setRawResponse] = useState(null);
+  const [call1SignupResponse, setCall1SignupResponse] = useState(null);
+  const [call1LookupResponse, setCall1LookupResponse] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -19,6 +20,8 @@ function Purchasecompletionpage({ onBackToForm }) {
     setError('');
     setLoading(true);
     setProgress(0);
+    setCall1SignupResponse(null);
+    setCall1LookupResponse(null);
     setStatusMessage('Executing Call 1: Sending customer details to ResellerClub (/api/customers/v2/signup.json)...');
 
     try {
@@ -76,7 +79,7 @@ function Purchasecompletionpage({ onBackToForm }) {
         data = responseText;
       }
 
-      setRawResponse(data);
+      setCall1SignupResponse(data);
 
       // Check if ResellerClub returned a numeric customer ID (Direct Success)
       const isNumericId = typeof data === 'number' || (!isNaN(data) && Number(data) > 0);
@@ -105,6 +108,8 @@ function Purchasecompletionpage({ onBackToForm }) {
         const lookupUrl = `/api/customers/details.json?auth-userid=${authUserId.trim()}&api-key=${apiKey.trim()}&username=${encodeURIComponent(formData.email.trim().toLowerCase())}`;
         const lookupRes = await fetch(lookupUrl);
         const lookupData = await lookupRes.json();
+
+        setCall1LookupResponse(lookupData);
 
         if (lookupData?.customerid) {
           const existingId = String(lookupData.customerid).trim();
@@ -181,13 +186,23 @@ function Purchasecompletionpage({ onBackToForm }) {
         </div>
       )}
 
-      {/* Raw Response Viewer */}
-      {rawResponse && (
+      {/* Raw Response Viewers for Call 1 & Lookup */}
+      {call1SignupResponse && (
         <div>
           <br />
           <details>
-            <summary>View Raw Call 1 Response JSON</summary>
-            <pre>{JSON.stringify(rawResponse, null, 2)}</pre>
+            <summary>View Raw JSON from Call 1 (/api/customers/v2/signup.json)</summary>
+            <pre>{JSON.stringify(call1SignupResponse, null, 2)}</pre>
+          </details>
+        </div>
+      )}
+
+      {call1LookupResponse && (
+        <div>
+          <br />
+          <details open>
+            <summary>View Raw JSON from Call 1b Customer Details Lookup (/api/customers/details.json)</summary>
+            <pre>{JSON.stringify(call1LookupResponse, null, 2)}</pre>
           </details>
         </div>
       )}
