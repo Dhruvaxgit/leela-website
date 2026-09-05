@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 
 const REGISTRANT_STORAGE_KEY = 'leela_registrant_cache';
 const CUSTOMER_ID_STORAGE_KEY = 'leela_customer_id';
+const CONTACT_ID_STORAGE_KEY = 'leela_contact_id';
 
 function Purchasecompletionpage({ onBackToForm }) {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Initiating Call 1: Customer Account Creation...');
   const [customerId, setCustomerId] = useState(null);
+  const [contactId, setContactId] = useState(null);
   const [call1SignupResponse, setCall1SignupResponse] = useState(null);
   const [call1LookupResponse, setCall1LookupResponse] = useState(null);
+  const [call2Response, setCall2Response] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -90,8 +93,8 @@ function Purchasecompletionpage({ onBackToForm }) {
         sessionStorage.setItem(CUSTOMER_ID_STORAGE_KEY, idStr);
         // Rule: Complete progress bar by 25% on Call 1 success
         setProgress(25);
-        setStatusMessage(`Call 1 Success: Customer Account Created with Customer ID: ${idStr}`);
-        setLoading(false);
+        // Automatically start Call 2 with resolved customer ID
+        await executeCall2(idStr, formData, authUserId, apiKey);
         return;
       }
 
@@ -117,8 +120,8 @@ function Purchasecompletionpage({ onBackToForm }) {
           sessionStorage.setItem(CUSTOMER_ID_STORAGE_KEY, existingId);
           // Rule: Complete progress bar by 25% on Call 1 success
           setProgress(25);
-          setStatusMessage(`Call 1 Success: Existing Customer Account Verified with Customer ID: ${existingId}`);
-          setLoading(false);
+          // Automatically start Call 2 with resolved customer ID
+          await executeCall2(existingId, formData, authUserId, apiKey);
           return;
         }
       }
@@ -131,8 +134,108 @@ function Purchasecompletionpage({ onBackToForm }) {
       throw new Error('Unexpected response format received from ResellerClub');
 
     } catch (err) {
-      setError(`Call 1 Failed: ${err.message}`);
-      setStatusMessage('Call 1 Stopped. Action required.');
+      setError(`Process Failed: ${err.message}`);
+      setStatusMessage('Process Stopped. Action required.');
+      setLoading(false);
+    }
+  };
+
+  const executeCall2 = async (resolvedCustomerId, formData, authUserId, apiKey) => {
+    setStatusMessage('Call 1 Succeeded (25%). Executing Call 2: Creating WHOIS Contact Card (/api/contacts/add.json)...');
+
+    try {
+      const cleanPhoneCc = String(formData.phoneCountryCode || '91').replace(/\D/g, '');
+      const cleanPhone = String(formData.phone || '').replace(/\D/g, '');
+      const cleanCountry = String(formData.country || 'IN').trim().toUpperCase();
+
+      const contactParams = new URLSearchParams({
+        'auth-userid': authUserId.trim(),
+        'api-key': apiKey.trim(),
+        'customer-id': resolvedCustomerId,
+        'name': formData.name.trim(),
+        'company': formData.company.trim() || 'Individual',
+        'email': formData.email.trim().toLowerCase(),
+        'address-line-1': formData.addressLine1.trim(),
+        'city': formData.city.trim(),
+        'state': formData.state.trim(),
+        'country': cleanCountry,
+        'zipcode': formData.zipcode.trim(),
+        'phone-cc': cleanPhoneCc,
+        'phone': cleanPhone,
+        'type': 'Contact'
+      });
+
+      const response = await fetch('/api/contacts/add.json', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: contactParams.toString()
+      });
+
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = responseText;
+      }
+
+      setCall2Response(data);
+
+      const isNumericContactId = typeof data === 'number' || (!isNaN(data) && Number(data) > 0);
+
+      if (isNumericContactId) {
+        const contactIdStr = String(data).trim();
+        setContactId(contactIdStr);
+        sessionStorage.setItem(CONTACT_ID_STORAGE_KEY, contactIdStr);
+        // Rule: Complete progress bar by 50% on Call 2 success
+        setProgress(50);
+        setStatusMessage(`Call 2 Success: Legal WHOIS Contact Card Created with Contact ID: ${contactIdStr}`);
+        setLoading(false);
+        return;
+      }
+
+      // Check fallback for existing default contact
+      const defaultParams = new URLSearchParams({
+        'auth-userid': authUserId.trim(),
+        'api-key': apiKey.trim(),
+        'customer-id': resolvedCustomerId,
+        'type': 'Contact'
+      });
+
+      const defaultRes = await fetch('/api/contacts/default.json', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: defaultParams.toString()
+      });
+
+      const defaultData = await defaultRes.json();
+      const existingContactId = defaultData?.Contact?.registrant || defaultData?.Contact?.techContactDetails?.['contact.contactid'];
+
+      if (existingContactId) {
+        const contactIdStr = String(existingContactId).trim();
+        setContactId(contactIdStr);
+        sessionStorage.setItem(CONTACT_ID_STORAGE_KEY, contactIdStr);
+        // Rule: Complete progress bar by 50% on Call 2 success
+        setProgress(50);
+        setStatusMessage(`Call 2 Success: Existing WHOIS Contact Card Verified with Contact ID: ${contactIdStr}`);
+        setCall2Response(defaultData);
+        setLoading(false);
+        return;
+      }
+
+      if (data?.status === 'ERROR' || data?.status === 'error') {
+        throw new Error(data.message || 'ResellerClub Contact API Error');
+      }
+
+      throw new Error('Unexpected response format received from Contact API');
+
+    } catch (err) {
+      setError(`Call 2 Failed: ${err.message}`);
+      setStatusMessage('Call 2 Stopped. Action required.');
       setLoading(false);
     }
   };
@@ -168,7 +271,14 @@ function Purchasecompletionpage({ onBackToForm }) {
       {customerId && (
         <div>
           <p><strong>Customer ID:</strong> {customerId}</p>
-          <p><em>(Call 1 finished. 25% completed. Ready for Call 2: WHOIS Contact Creation).</em></p>
+        </div>
+      )}
+
+      {/* Contact ID Display upon Call 2 Success */}
+      {contactId && (
+        <div>
+          <p><strong>WHOIS Contact ID:</strong> {contactId}</p>
+          <p><em>(Call 1 & Call 2 finished. 50% completed. Ready for Call 3: Domain Purchase & Registration).</em></p>
         </div>
       )}
 
@@ -177,7 +287,7 @@ function Purchasecompletionpage({ onBackToForm }) {
         <div>
           <p><strong>Error Encountered:</strong> {error}</p>
           <button type="button" onClick={executeCall1}>
-            Retry Call 1
+            Retry Process
           </button>
           <span> </span>
           <button type="button" onClick={onBackToForm}>
@@ -186,7 +296,7 @@ function Purchasecompletionpage({ onBackToForm }) {
         </div>
       )}
 
-      {/* Raw Response Viewers for Call 1 & Lookup */}
+      {/* Raw Response Viewers for Call 1, Lookup, and Call 2 */}
       {call1SignupResponse && (
         <div>
           <br />
@@ -203,6 +313,16 @@ function Purchasecompletionpage({ onBackToForm }) {
           <details open>
             <summary>View Raw JSON from Call 1b Customer Details Lookup (/api/customers/details.json)</summary>
             <pre>{JSON.stringify(call1LookupResponse, null, 2)}</pre>
+          </details>
+        </div>
+      )}
+
+      {call2Response && (
+        <div>
+          <br />
+          <details open>
+            <summary>View Raw JSON from Call 2 (/api/contacts/add.json)</summary>
+            <pre>{JSON.stringify(call2Response, null, 2)}</pre>
           </details>
         </div>
       )}
